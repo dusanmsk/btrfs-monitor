@@ -1,0 +1,30 @@
+# example config file
+
+# configure email notifications
+email:
+  smtp_server: smtp.server.address
+  smtp_port: 25
+  sender_email: admin@example.com
+  sender_password:
+  receiver_email: admin@example.com, anotheradmin@example.com
+
+# configure pushover notifications
+pushover:
+  user_key: xyz
+  application_key: xyz
+
+# when not specified, defaults will be used
+timing:
+  # how often check for errors and send notifications
+  monitor_sleep_sec: 600
+  # how often check btrfs device stats
+  stats_sleep_sec: 600
+  # when first btrfs error is detected in kernel logs, how long wait to collect following errors before sending notification
+  journal_error_wait_sec: 10
+
+# when not specified, all mounted btrfs filesystems will be checked
+#mountpoints:
+#  - "/"
+#  - "/mnt/pool1/"
+#  - "/mnt/pool2/"
+#  - "/mnt/pool3/"
