@@ -1,17 +1,19 @@
 # example config file
 
 # configure email notifications
-email:
-  smtp_server: smtp.server.address
-  smtp_port: 25
-  sender_email: admin@example.com
-  sender_password:
-  receiver_email: admin@example.com, anotheradmin@example.com
+#email:
+#  smtp_server: smtp.server.address
+#  smtp_port: 587
+#  #smtp_login:
+#  #smtp_password:
+#  #ignore_ssl_errors: true
+#  sender_email: sender@your.domain
+#  recipients: admin1@your.domain, admin2@your.domain
 
 # configure pushover notifications
-pushover:
-  user_key: xyz
-  application_key: xyz
+#pushover:
+#  user_key: abc
+#  application_key: xyz
 
 # when not specified, defaults will be used
 timing:
@@ -21,6 +23,8 @@ timing:
   stats_sleep_sec: 600
   # when first btrfs error is detected in kernel logs, how long wait to collect following errors before sending notification
   journal_error_wait_sec: 10
+  # when new errors are still comming, prevent spamming
+  error_debounce_sec: 900
 
 # when not specified, all mounted btrfs filesystems will be checked
 #mountpoints:

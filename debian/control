@@ -1,0 +1,12 @@
+Source: btrfs-monitor
+Section: admin
+Priority: optional
+Maintainer: Dusan Zatkovsky <dusanmsk@gmail.com>
+Build-Depends: debhelper (>= 10)
+Standards-Version: 4.1.2
+
+Package: btrfs-monitor
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3, python3-yaml, python3-requests, python3-psutil, python3-box
+Description: BTRFS monitoring daemon
+ Monitors BTRFS filesystems for errors and missing devices, sending notifications via email or Pushover.

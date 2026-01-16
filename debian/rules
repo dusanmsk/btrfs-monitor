@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	mkdir -p debian/btrfs-monitor/usr/bin
+	mkdir -p debian/btrfs-monitor/etc
+	mkdir -p debian/btrfs-monitor/lib/systemd/system
+	cp btrfs-monitor.py debian/btrfs-monitor/usr/bin/btrfs-monitor
+	chmod +x debian/btrfs-monitor/usr/bin/btrfs-monitor
+	cp config.yaml.example debian/btrfs-monitor/etc/btrfs-monitor.yml
+	cp btrfs-monitor.service debian/btrfs-monitor/lib/systemd/system/btrfs-monitor.service

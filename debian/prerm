@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ]; then
+    if [ -x "/bin/systemctl" ]; then
+        systemctl stop btrfs-monitor.service
+        systemctl disable btrfs-monitor.service
+    fi
+fi
+
+#DEBHELPER#

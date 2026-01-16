@@ -1,0 +1,57 @@
+name: Release Debian Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential debhelper dh-python python3-all python3-setuptools
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+    - name: Update changelog version
+      run: |
+        sed -i "s/0.1.0-1/${{ env.VERSION }}-1/" debian/changelog
+
+    - name: Build package
+      run: |
+        dpkg-buildpackage -us -uc
+        mkdir -p build_artifacts
+        mv ../*.deb build_artifacts/
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: build_artifacts/btrfs-monitor_${{ env.VERSION }}-1_all.deb
+        asset_name: btrfs-monitor_${{ env.VERSION }}-1_all.deb
+        asset_content_type: application/vnd.debian.binary-package

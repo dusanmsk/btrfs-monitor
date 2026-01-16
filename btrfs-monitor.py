@@ -1,4 +1,7 @@
+#!/usr/bin/env python3
+
 import json
+import ssl
 import glob
 import os
 import platform
@@ -20,7 +23,7 @@ cfg = Box(default_box=True)
 
 # todo loglevel
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("btrfs_logwatch")
+log = logging.getLogger("btrfs_monitor")
 
 def load_config(config_path):
     global cfg
@@ -44,6 +47,7 @@ def load_config(config_path):
     cfg.timing.stats_sleep_sec = cfg.timing.get('stats_sleep_sec', 600)
     cfg.timing.monitor_sleep_sec = cfg.timing.get('monitor_sleep_sec', 600)
     cfg.timing.journal_error_wait_sec = cfg.timing.get('journal_error_wait_sec', 60)
+    cfg.timing.error_debounce_sec = cfg.timing.get('error_debounce_sec', 3600)
 
     # Set default values for mountpoints
     cfg.mountpoints = cfg.get('mountpoints')
@@ -55,22 +59,13 @@ pattern = re.compile(r"(error|warn)", re.IGNORECASE)
 # cyclic buffer for kernel errors, cleared after each report (because we are watching kernel journal so no old messages come when restarted)
 journal_errors = []
 
-# map of device:error counter (sum of all errors of device)
-failing_devices = {}
-
-# devices that was already reported as failing
-reported_failing_devices = []
-
-# set of reported lines (to prevent repeated reporting of the same errors)
-already_reported_stats_lines = set()
-
-lock = threading.Lock()
-
 
 class StateMachine:
     def __init__(self):
         self.missing_map = {}
-        pass
+        self.error_count = {}
+        self.last_error_notification = {}
+        self.current_debounce = {}
 
     def updateMissingDevice(self, uuid, is_missing):
         old_missing = self.missing_map.get(uuid, False)
@@ -78,15 +73,42 @@ class StateMachine:
             msg = f"Missing device detected for {uuid}"
             log.error(msg)
             sendNotification("Missing device", [msg])
-            # todo report missing
-        if old_missing == True and is_missing == False:
+        elif old_missing == True and is_missing == False:
             msg=f"Missing device back to normal on {uuid}"
             log.info(msg)
             sendNotification("Missing device OK", [msg])
-
         self.missing_map[uuid] = is_missing # Update the state
 
 
+    # update count of errors per mountpoint. Handles sending notification if number of errors has increased, debouncing when it is increasing
+    # continuously (to prevent spamming), reports when errors get back to zero. Maximum debounce time is 24 hours (so it will always sent 1 notification
+    # per day in case of error)
+    def updateErrorCount(self, mountpoint, err_cnt):
+        last_err_cnt = self.error_count.get(mountpoint, 0)
+        
+        if last_err_cnt < err_cnt:
+            current_time = time.time()
+            last_notif_time = self.last_error_notification.get(mountpoint, 0)
+            current_delay = self.current_debounce.get(mountpoint, 0)
+            
+            if (current_time - last_notif_time) > current_delay:
+                sendNotification(f"BTRFS errors", f"BTRFS error count increased on {mountpoint} to {err_cnt}\nRun sudo btrfs device stats {mountpoint} to check.")
+                self.last_error_notification[mountpoint] = current_time
+                
+                if current_delay == 0:
+                    new_delay = cfg.timing.error_debounce_sec
+                else:
+                    new_delay = current_delay * 2
+                
+                self.current_debounce[mountpoint] = min(new_delay, 86400)       # max debounce 24h
+            else:
+                log.debug(f"Error count increased on {mountpoint} to {err_cnt}, notification suppressed (debounce active, wait {current_delay}s)")
+        elif last_err_cnt > 0 and err_cnt == 0:
+            sendNotification(f"BTRFS errors back to normal", f"Error count back to normal on {mountpoint}\nRun sudo btrfs device stats {mountpoint} to check.")
+            if mountpoint in self.current_debounce:
+                del self.current_debounce[mountpoint]
+        
+        self.error_count[mountpoint] = err_cnt
 
 state_machine = StateMachine()
 
@@ -108,9 +130,8 @@ def watch_journal():
     with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
         for line in proc.stdout:
             if "btrfs" in line.lower() and pattern.search(line):
-                with lock:
-                    journal_errors.append(line.strip())
-                    log.error(f"BTRFS ERROR: {line.strip()}")
+                journal_errors.append(line.strip())
+                log.error(f"BTRFS ERROR: {line.strip()}")
 
 def watch_btrfs_stats():
     try:
@@ -120,12 +141,11 @@ def watch_btrfs_stats():
                 stats_cmd = ["sudo", "btrfs", "--format", "json", "device", "stats", mountpoint]
                 result = subprocess.run(stats_cmd, capture_output=True, text=True, check=True)
                 stats_json = json.loads(result.stdout.strip())
+                err_cnt = 0
                 for device in stats_json['device-stats']:
                     device_name = device['device']
-                    err_cnt = int(device['write_io_errs'] + device['read_io_errs'] + device['flush_io_errs'] + device['corruption_errs'] + device['generation_errs'])
-                    failing_devices[device_name] = [err_cnt, mountpoint]
-                    if err_cnt > 0:
-                        log.error(f"Failing device warning: {device_name} at mountpoint {mountpoint} with {err_cnt} errors")
+                    err_cnt += int(device['write_io_errs'] + device['read_io_errs'] + device['flush_io_errs'] + device['corruption_errs'] + device['generation_errs'])
+                state_machine.updateErrorCount(mountpoint, err_cnt)
             # check for missing devices (degraded arrays)
             btrfs_sys_path = "/sys/fs/btrfs/"
             for fs_uuid_path in glob.glob(os.path.join(btrfs_sys_path, "*")):
@@ -133,7 +153,6 @@ def watch_btrfs_stats():
                 if os.path.isdir(fs_uuid_path):
                     fs_uuid = os.path.basename(fs_uuid_path)
                     for devinfo_path in glob.glob(os.path.join(fs_uuid_path, "devinfo", "*")):
-
                         if os.path.isdir(devinfo_path):
                             device_name = os.path.basename(devinfo_path)
                             missing_file_path = os.path.join(devinfo_path, "missing")
@@ -144,35 +163,38 @@ def watch_btrfs_stats():
                                         log.warning(msg)
                                         missing_count+=1
                 state_machine.updateMissingDevice(fs_uuid, True if missing_count > 0 else False)
-
-
             time.sleep(cfg.timing.stats_sleep_sec)
     except Exception as e:
         log.error("Failure during btrfs stats monitoring", e)
         time.sleep(cfg.timing.stats_sleep_sec)
 
 def monitor_and_report():
+    last_journal_notif_time = 0
+    current_journal_debounce = 0
     try:
         while True:
             report_body = []
-            for device in failing_devices:
-
-                errcnt = failing_devices[device][0]
-                mountpoint = failing_devices[device][1]
-                if errcnt > 0:
-                    if device not in reported_failing_devices:
-                        report_body.append(f"Device with FAILURES: {device} at mountpoint {mountpoint} with {errcnt} errors")
-                        reported_failing_devices.append(device)
 
             if journal_errors:
-                log.debug(f"Journal errors detected, waiting {cfg.timing.journal_error_wait_sec} for more to come before reporting")
-                time.sleep(cfg.timing.journal_error_wait_sec)        # if errors in journal raised, wait a whilew for others to come, then report
-                report_body.append("\n\n------- Journal errors -------\n\n")
-                report_body+=journal_errors
-                journal_errors.clear()
+                current_time = time.time()
+                if (current_time - last_journal_notif_time) > current_journal_debounce:
+                    log.debug(f"Journal errors detected, waiting {cfg.timing.journal_error_wait_sec} for more to come before reporting")
+                    time.sleep(cfg.timing.journal_error_wait_sec)        # if errors in journal raised, wait a while for others to come, then report
+                    report_body.append("\n\n------- Journal errors -------\n\n")
+                    report_body.append("Check with sudo journalctl -t kernel | grep -i btrfs\n\n")
+                    report_body += journal_errors
+                    journal_errors.clear()
+                    last_journal_notif_time = current_time
+                    if current_journal_debounce == 0:
+                        current_journal_debounce = cfg.timing.error_debounce_sec
+                    else:
+                        current_journal_debounce = min(current_journal_debounce * 2, 86400)
+                else:
+                    log.debug(f"Journal errors detected, notification suppressed (debounce active, wait {current_journal_debounce}s)")
+                    # Errors remain in journal_errors and will be reported after debounce expires
 
             if report_body:
-                sendNotification(f"BTRFS Errors detected on {platform.node()}", report_body)
+                sendNotification(f"BTRFS kernel errors detected", report_body)
 
 
             time.sleep(cfg.timing.monitor_sleep_sec)
@@ -184,18 +206,18 @@ def monitor_and_report():
 def shorten(body_lines, limit):
     if len(body_lines) > limit:
         body = "\n".join(body_lines[-limit:])
-        body.join("\n ... shortened ...")
+        body.join(f"\n ... shortened, {len(body_lines) - limit} lines following ...")
     else:
         body = "\n".join(body_lines)
     return body
 
 
 def sendEmailNotification(subject, body_lines):
-    if not cfg.email.sender_email:
+    if not cfg.email.recipients:
         log.debug("No email configured, noop")
         return
     body = shorten(body_lines, 1000)
-    for address in cfg.email.receiver_email.split(","):
+    for address in cfg.email.recipients.split(","):
         address = address.strip()
         msg = EmailMessage()
         msg['Subject'] = subject
@@ -203,18 +225,48 @@ def sendEmailNotification(subject, body_lines):
         msg['To'] = address
         msg.set_content(body)
 
+        # Prepare SSL context (verifies certificates, uses modern TLS)
+        context = ssl.create_default_context()
+        if cfg.email.ignore_ssl_errors:
+            log.warning("Configured to skip ssl checks on smtp")
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+
+        # Decide which class to use based on the port
+        # Port 465 requires SSL from the beginning (Implicit SSL)
+        if cfg.email.smtp_port == 465:
+            smtp_class = smtplib.SMTP_SSL
+            smtp_kwargs = {"context": context}
+        else:
+            # Port 587 or 25 start as Plaintext and can be upgraded via STARTTLS
+            smtp_class = smtplib.SMTP
+            smtp_kwargs = {}
+
         try:
-            with smtplib.SMTP(cfg.email.smtp_server, cfg.email.smtp_port) as smtp:
-                #smtp.set_debuglevel(1)
-                if cfg.email.sender_password is not None:
-                    smtp.login(cfg.email.sender_email, cfg.email.sender_password)
+            with smtp_class(cfg.email.smtp_server, cfg.email.smtp_port, **smtp_kwargs) as smtp:
+                #smtp.set_debuglevel(1) # Enable for deep debugging
+
+                # If we aren't using SSL from the start, try STARTTLS
+                if cfg.email.smtp_port != 465:
+                    smtp.ehlo()  # Identify to the server
+                    if smtp.has_extn("STARTTLS"):
+                        log.debug("Server supports STARTTLS, upgrading to encrypted connection.")
+                        smtp.starttls(context=context)
+                        smtp.ehlo()  # Re-identify after encryption is active
+                    else:
+                        log.debug("Server does not support STARTTLS. Proceeding in Plaintext.")
+
+                # Login if a password is provided in config
+                if cfg.email.sender_password:
+                    smtp.login(cfg.email.smtp_login, cfg.email.smtp_password)
+
                 smtp.send_message(msg)
-            log.debug(f"Email sent to {address}")
+                log.info(f"Email successfully sent to {address}")
         except Exception as e:
-            print(f"Chyba: {e}")
+            log.error(f"Error: {e}")
 
 
-def send_pushover(subject, body_lines, priority=1):
+def sendPushoverNotification(subject, body_lines, priority=0):
     if not cfg.pushover.user_key:
         log.debug("No pushover configuration, noop")
         return
@@ -225,7 +277,7 @@ def send_pushover(subject, body_lines, priority=1):
         "user": cfg.pushover.user_key,
         "message": body,
         "title": subject,
-        "priority": priority  # 1 je vysoká priorita, 0 je normálna
+        "priority": priority  # 1 high, 0 normal
     }
 
     try:
@@ -237,14 +289,19 @@ def send_pushover(subject, body_lines, priority=1):
 
 
 def sendNotification(subject, report_body_lines, priority=1):
+    if not isinstance(report_body_lines, list):
+        report_body_lines = [report_body_lines]
+    hostname=platform.node()
+    if not hostname in subject:
+        subject = f"{subject} at {hostname}"
     log.info("Sending following report:\n\n\t" + subject + "\n" + "\t" + "\n\t".join(report_body_lines))
     sendEmailNotification(subject, report_body_lines)
-    send_pushover(subject, report_body_lines, priority)
+    sendPushoverNotification(subject, report_body_lines, priority)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", default="/etc/btrfswatchd.yml", help="Path to config file")
+    parser.add_argument("-c", "--config", default="/etc/btrfs-monitor.yml", help="Path to config file")
     args = parser.parse_args()
 
     load_config(args.config)

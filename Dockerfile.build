@@ -1,0 +1,27 @@
+FROM debian:latest
+
+# Install build dependencies
+RUN apt-get update && \
+    apt-get install -y \
+    build-essential \
+    debhelper \
+    dh-python \
+    python3-all \
+    python3-setuptools \
+    rsync \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory
+WORKDIR /workspace
+
+# Command to build the package
+# 1. Create a temp directory
+# 2. Copy source code there (excluding .git and existing debs)
+# 3. Build the package
+# 4. Copy the resulting .deb back to the workspace
+CMD ["/bin/bash", "-c", "mkdir -p /tmp/build/src && \
+    rsync -a --exclude .git --exclude '*.deb' --exclude 'build_artifacts' /workspace/ /tmp/build/src/ && \
+    cd /tmp/build/src && \
+    dpkg-buildpackage -us -uc && \
+    cp ../*.deb /workspace/ && \
+    chown --reference=/workspace /workspace/*.deb"]

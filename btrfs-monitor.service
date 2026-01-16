@@ -1,0 +1,13 @@
+[Unit]
+Description=BTRFS Monitor Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/btrfs-monitor -c /etc/btrfs-monitor.yml
+Restart=on-failure
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
