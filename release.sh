@@ -9,7 +9,6 @@ dch -r
 git add debian/changelog
 git commit -m "Release version $VERSION"
 
-
 rm dist/* || true
 ./build.sh
 
