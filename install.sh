@@ -7,7 +7,7 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-INSTALL_DIR="/usr/bin"
+INSTALL_DIR="/usr/sbin"
 CONFIG_DIR="/etc"
 SYSTEMD_DIR="/etc/systemd/system"
 
@@ -33,5 +33,5 @@ fi
 cp btrfs-monitor.service "$SYSTEMD_DIR/"
 systemctl daemon-reload
 systemctl enable btrfs-monitor.service
+systemctl start btrfs-monitor.service
 
-echo "Installation complete. You can start the service with: systemctl start btrfs-monitor"

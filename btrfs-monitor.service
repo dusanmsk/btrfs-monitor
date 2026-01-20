@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/btrfs-monitor -c /etc/btrfs-monitor.yml
+ExecStart=/usr/sbin/btrfs-monitor -c /etc/btrfs-monitor.yml
 Restart=on-failure
 User=root
 Group=root

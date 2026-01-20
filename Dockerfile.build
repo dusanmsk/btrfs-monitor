@@ -23,5 +23,7 @@ CMD ["/bin/bash", "-c", "mkdir -p /tmp/build/src && \
     rsync -a --exclude .git --exclude '*.deb' --exclude 'build_artifacts' /workspace/ /tmp/build/src/ && \
     cd /tmp/build/src && \
     dpkg-buildpackage -us -uc && \
-    cp ../*.deb /workspace/ && \
-    chown --reference=/workspace /workspace/*.deb"]
+    mkdir -p /workspace/dist && \
+    cp ../*.deb /workspace/dist && \
+    chown -R --reference=/workspace /workspace/dist/"]
+
