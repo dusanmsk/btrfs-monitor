@@ -1,3 +1,9 @@
+btrfs-monitor (0.1.1) unstable; urgency=medium
+
+  * first release
+
+ -- msk <dusanmsk@gmail.com>  Tue, 20 Jan 2026 09:41:11 +0100
+
 btrfs-monitor (0.1.0-3) unstable; urgency=medium
 
   * Initial release.
