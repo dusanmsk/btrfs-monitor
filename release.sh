@@ -24,6 +24,7 @@ gh release create v${VERSION} $DEB --title "Release of $VERSION"
 git add debian/changelog
 git commit -m "Release version $VERSION"
 git tag v$VERSION
+git push
 git push --tags
 
 echo "Build complete. Package is in the dist directory and release is on github."
