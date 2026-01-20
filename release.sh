@@ -1,17 +1,23 @@
 #!/bin/bash
 set -e
 
-IMAGE_NAME="btrfs-monitor-builder"
-echo "Building Docker image..."
-docker build -t $IMAGE_NAME -f Dockerfile.build .
+dch -i
+dch -r
 
-echo "Building Debian package..."
 rm dist/* || true
-docker run --rm -v $(pwd):/workspace $IMAGE_NAME
+./build.sh
 
-# Predpokladajme, že váš súbor sa volá btrfs-logwatch_1.0_amd64.deb
 VERSION=`dpkg-parsechangelog -S Version`
-gh release create v$VERSION dist/btrfs-monitor_${VERSION}_all.deb --title "Release of $VERSION"
+DEB="dist/btrfs-monitor_${VERSION}_all.deb"
+if [ -f "$DEB" ]; then
+    echo "Debian package built: $DEB"
+else
+    echo "Error: Debian package not found!"
+    exit 1
+fi
+gh release create v${VERSION} $DEB --title "Release of $VERSION"
+git add debian/changelog
+git commit -m "Release version $VERSION"
 git tag v$VERSION
 git push --tags
 
