@@ -21,9 +21,6 @@ import argparse
 # Global configuration object
 cfg = Box(default_box=True)
 
-# todo loglevel
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("btrfs_monitor")
 
 def load_config(config_path):
     global cfg
@@ -244,7 +241,9 @@ def sendEmailNotification(subject, body_lines):
 
         try:
             with smtp_class(cfg.email.smtp_server, cfg.email.smtp_port, **smtp_kwargs) as smtp:
-                #smtp.set_debuglevel(1) # Enable for deep debugging
+                global args
+                if args.debug:
+                    smtp.set_debuglevel(1)
 
                 # If we aren't using SSL from the start, try STARTTLS
                 if cfg.email.smtp_port != 465:
@@ -302,9 +301,20 @@ def sendNotification(subject, report_body_lines, priority=1):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", default="/etc/btrfs-monitor.yml", help="Path to config file")
+    parser.add_argument("-t", "--test",  help="Test notification and exit", action="store_true")
+    parser.add_argument("-d", "--debug", help="Enable debug logging", action="store_true")
+    global args
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    log = logging.getLogger("btrfs_monitor")
+
     load_config(args.config)
+
+    if args.test:
+        log.info("Running in test mode, sending test notification and exiting")
+        sendNotification("BTRFS Monitor Test Notification", ["This is a test notification from BTRFS Monitor. If you received this, email and pushover notifications are working correctly."])
+        exit(0)
 
     log.info("Starting to monitor BTRFS filesystems: " + ", ".join(list_mountpoints()))
 
