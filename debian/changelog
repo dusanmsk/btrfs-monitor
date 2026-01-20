@@ -1,3 +1,10 @@
+btrfs-monitor (0.0.4) unstable; urgency=medium
+
+  * enhanced debugging
+  * added --test to test configuration
+
+ -- msk <dusanmsk@gmail.com>  Tue, 20 Jan 2026 10:44:13 +0100
+
 btrfs-monitor (0.0.3) unstable; urgency=medium
 
   * removed sudo
