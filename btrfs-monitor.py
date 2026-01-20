@@ -126,7 +126,7 @@ def list_mountpoints():
         return btrfs_mountpoints
 
 def watch_journal():
-    cmd = ["sudo", "journalctl", "-f", "-t", "kernel"]
+    cmd = ["journalctl", "-f", "-t", "kernel"]
     with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
         for line in proc.stdout:
             if "btrfs" in line.lower() and pattern.search(line):
@@ -138,7 +138,7 @@ def watch_btrfs_stats():
         while True:
             # get and check device stats
             for mountpoint in list_mountpoints():
-                stats_cmd = ["sudo", "btrfs", "--format", "json", "device", "stats", mountpoint]
+                stats_cmd = ["btrfs", "--format", "json", "device", "stats", mountpoint]
                 result = subprocess.run(stats_cmd, capture_output=True, text=True, check=True)
                 stats_json = json.loads(result.stdout.strip())
                 err_cnt = 0

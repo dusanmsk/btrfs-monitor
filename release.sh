@@ -1,8 +1,14 @@
 #!/bin/bash
 set -e
 
+git diff-index --quiet HEAD || { echo "Error: Uncommitted changes detected. Please commit or stash them before proceeding."; exit 1; }
+
 dch -i
 dch -r
+
+git add debian/changelog
+git commit -m "Release version $VERSION"
+
 
 rm dist/* || true
 ./build.sh
