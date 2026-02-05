@@ -40,6 +40,9 @@ def load_config(config_path):
     cfg.email.sender_password = cfg.email.get('sender_password', None)
     cfg.email.receiver_email = cfg.email.get('receiver_email', None)
 
+    cfg.healthchecks = cfg['healthchecks'] if 'healthchecks' in cfg else Box(default_box=True)
+    cfg.healthchecks.uuid = cfg.healthchecks['uuid'] if 'uuid' in cfg.healthchecks else None
+
     # Set default values for timing constants
     cfg.timing.stats_sleep_sec = cfg.timing.get('stats_sleep_sec', 600)
     cfg.timing.monitor_sleep_sec = cfg.timing.get('monitor_sleep_sec', 600)
@@ -165,8 +168,13 @@ def watch_btrfs_stats():
         log.error("Failure during btrfs stats monitoring", e)
         time.sleep(cfg.timing.stats_sleep_sec)
 
+# Track last healthchecks status (True=OK, False=fail)
+last_healthchecks_status = True
+
 def monitor_and_report():
+    global last_healthchecks_status
     last_journal_notif_time = 0
+    last_healthchecks_notif_time = 0
     current_journal_debounce = 0
     try:
         while True:
@@ -176,7 +184,7 @@ def monitor_and_report():
                 current_time = time.time()
                 if (current_time - last_journal_notif_time) > current_journal_debounce:
                     log.debug(f"Journal errors detected, waiting {cfg.timing.journal_error_wait_sec} for more to come before reporting")
-                    time.sleep(cfg.timing.journal_error_wait_sec)        # if errors in journal raised, wait a while for others to come, then report
+                    time.sleep(cfg.timing.journal_error_wait_sec)
                     report_body.append("\n\n------- Journal errors -------\n\n")
                     report_body.append("Check with sudo journalctl -t kernel | grep -i btrfs\n\n")
                     report_body += journal_errors
@@ -188,11 +196,23 @@ def monitor_and_report():
                         current_journal_debounce = min(current_journal_debounce * 2, 86400)
                 else:
                     log.debug(f"Journal errors detected, notification suppressed (debounce active, wait {current_journal_debounce}s)")
-                    # Errors remain in journal_errors and will be reported after debounce expires
 
             if report_body:
                 sendNotification(f"BTRFS kernel errors detected", report_body)
+                sendHealthchecksIoStatus(False)
+                last_healthchecks_status = False
 
+            all_errors_zero = all(count == 0 for count in state_machine.error_count.values())
+            all_missing_ok = all(not missing for missing in state_machine.missing_map.values())
+            everything_ok = all_errors_zero and all_missing_ok
+            current_time = time.time()
+            # Send healthchecks OK if everything is OK and (last status was False, or at least 1 hour passed since last OK)
+            if everything_ok:
+                if (not last_healthchecks_status) or (current_time - last_healthchecks_notif_time > 3600):
+                    log.info("All errors and missing devices cleared, sending healthchecks.io success ping (periodic or recovery)")
+                    sendHealthchecksIoStatus(True)
+                    last_healthchecks_status = True
+                    last_healthchecks_notif_time = current_time
 
             time.sleep(cfg.timing.monitor_sleep_sec)
 
@@ -207,6 +227,18 @@ def shorten(body_lines, limit):
     else:
         body = "\n".join(body_lines)
     return body
+
+
+def sendHealthchecksIoStatus(status):
+    if ( cfg.healthchecks.uuid):
+        uuid = cfg.healthchecks.uuid
+        url=f"https://hc-ping.com/{uuid}"
+        if(status == False):
+            url=f"https://hc-ping.com/{uuid}/fail"
+        try:
+            requests.get(url, timeout=10)
+        except requests.RequestException as e:
+            log.exception(f"Failed to send healthchecks.io request - {e}")
 
 
 def sendEmailNotification(subject, body_lines):
@@ -314,6 +346,7 @@ if __name__ == "__main__":
     if args.test:
         log.info("Running in test mode, sending test notification and exiting")
         sendNotification("BTRFS Monitor Test Notification", ["This is a test notification from BTRFS Monitor. If you received this, email and pushover notifications are working correctly."])
+        sendHealthchecksIoStatus(True)
         exit(0)
 
     log.info("Starting to monitor BTRFS filesystems: " + ", ".join(list_mountpoints()))

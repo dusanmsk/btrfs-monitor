@@ -15,6 +15,12 @@
 #  user_key: abc
 #  application_key: xyz
 
+# notify healthckecks.io
+# notification period is 1h, in case of error immediately
+#healthchecks:
+#  uuid: XXXXX-YYYYY-ZZZ-...
+
+
 # when not specified, defaults will be used
 timing:
   # how often check for errors and send notifications
