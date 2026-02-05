@@ -1,3 +1,9 @@
+btrfs-monitor (0.0.5-beta1) unstable; urgency=medium
+
+  * added beta support for healthchecks.io
+
+ -- msk <dusanmsk@gmail.com>  Thu, 05 Feb 2026 17:23:19 +0100
+
 btrfs-monitor (0.0.4) unstable; urgency=medium
 
   * enhanced debugging
